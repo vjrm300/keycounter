@@ -39,6 +39,15 @@ pub struct Settings {
     pub floating_ball_visible: bool,
 }
 
+/// 导出数据的容器格式
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ExportData {
+    pub version: String,
+    pub exported_at: String,
+    pub settings: Settings,
+    pub days: Vec<DailyStats>,
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -179,6 +188,61 @@ pub fn save_settings(settings: &Settings) -> Result<(), String> {
     fs::write(path, serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
 }
 
+/// 加载所有日期的统计数据
+pub fn load_all_stats() -> Vec<DailyStats> {
+    let data_dir = data_dir_or_default();
+    let mut results = Vec::new();
+    if let Ok(entries) = fs::read_dir(&data_dir) {
+        for entry in entries.flatten() {
+            let file_name = entry.file_name().to_string_lossy().to_string();
+            if file_name.ends_with(".json") && file_name != "settings.json" {
+                let date = file_name.trim_end_matches(".json");
+                if is_valid_date(date) {
+                    let stats = load_by_date(date);
+                    results.push(stats);
+                }
+            }
+        }
+    }
+    results.sort_by(|a, b| a.date.cmp(&b.date));
+    results
+}
+
+/// 导出所有数据为 JSON 字符串
+pub fn export_all() -> Result<String, String> {
+    let settings = load_settings();
+    let days = load_all_stats();
+    let export = ExportData {
+        version: "1.0.0".to_string(),
+        exported_at: Local::now().to_rfc3339(),
+        settings,
+        days,
+    };
+    serde_json::to_string_pretty(&export).map_err(|e| e.to_string())
+}
+
+/// 从 JSON 字符串导入数据，返回导入的天数
+pub fn import_from_json(json: &str) -> Result<usize, String> {
+    let import: ExportData = serde_json::from_str(json)
+        .map_err(|e| format!("解析 JSON 失败: {}", e))?;
+
+    let mut imported = 0;
+    for day in &import.days {
+        if is_valid_date(&day.date) && day.total_presses > 0 {
+            save(day)?;
+            imported += 1;
+        }
+    }
+
+    // 导入设置（可选，不覆盖现有设置）
+    let existing_settings = load_settings();
+    if existing_settings.floating_ball_key == "Space" && import.settings.floating_ball_key != "Space" {
+        let _ = save_settings(&import.settings);
+    }
+
+    Ok(imported)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -233,5 +297,30 @@ mod tests {
     fn test_is_valid_date() {
         assert!(is_valid_date("2026-06-01"));
         assert!(!is_valid_date("not-a-date"));
+    }
+
+    #[test]
+    fn test_export_import_roundtrip() {
+        let mut stats = DailyStats::default();
+        stats.date = "2026-06-01".to_string();
+        stats.total_presses = 500;
+        stats.active_keys = 3;
+        stats.keys.insert("Space".to_string(), KeyStat { count: 200, category: KeyCategory::Special, hourly: [0; 24], last_pressed: 1000 });
+        stats.keys.insert("KeyA".to_string(), KeyStat { count: 150, category: KeyCategory::Letter, hourly: [0; 24], last_pressed: 900 });
+
+        let export = ExportData {
+            version: "1.0.0".to_string(),
+            exported_at: "2026-06-01T12:00:00+08:00".to_string(),
+            settings: Settings::default(),
+            days: vec![stats],
+        };
+
+        let json = serde_json::to_string_pretty(&export).unwrap();
+        let parsed: ExportData = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed.version, "1.0.0");
+        assert_eq!(parsed.days.len(), 1);
+        assert_eq!(parsed.days[0].total_presses, 500);
+        assert_eq!(parsed.days[0].keys["Space"].count, 200);
     }
 }
