@@ -37,6 +37,8 @@ const COMMON_KEYS = [
 export default function Settings() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [saving, setSaving] = useState(false);
+  const [exportStatus, setExportStatus] = useState<string | null>(null);
+  const [importStatus, setImportStatus] = useState<string | null>(null);
 
   useEffect(() => {
     invoke<Settings>("get_settings").then((s) => setSettings(s)).catch((e) => console.error("[Settings] 加载设置失败:", e));
@@ -50,6 +52,44 @@ export default function Settings() {
     try { await invoke("update_settings", { settings: newSettings }); }
     catch (e) { console.error("[Settings] 保存设置失败:", e); }
     finally { setSaving(false); }
+  };
+
+  const handleExport = async () => {
+    try {
+      const json = await invoke<string>("export_data");
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `keycounter-export-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setExportStatus("导出成功");
+      setTimeout(() => setExportStatus(null), 3000);
+    } catch (e) {
+      setExportStatus("导出失败: " + String(e));
+      setTimeout(() => setExportStatus(null), 5000);
+    }
+  };
+
+  const handleImport = async () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json";
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const count = await invoke<number>("import_data", { json: text });
+        setImportStatus(`导入成功: ${count} 天数据`);
+        setTimeout(() => setImportStatus(null), 3000);
+      } catch (err) {
+        setImportStatus("导入失败: " + String(err));
+        setTimeout(() => setImportStatus(null), 5000);
+      }
+    };
+    input.click();
   };
 
   if (!settings) return <div className="flex items-center justify-center h-full"><span className="text-xs" style={{ color: "var(--text-tertiary)" }}>加载中...</span></div>;
@@ -67,6 +107,7 @@ export default function Settings() {
           </div>
         </div>
       </section>
+
       <section>
         <h3 className="text-xs font-semibold mb-3" style={{ color: "var(--text-secondary)" }}>通用</h3>
         <div className="space-y-3">
@@ -80,6 +121,36 @@ export default function Settings() {
           </div>
         </div>
       </section>
+
+      <section>
+        <h3 className="text-xs font-semibold mb-3" style={{ color: "var(--text-secondary)" }}>数据管理</h3>
+        <div className="space-y-2">
+          <button
+            onClick={handleExport}
+            className="w-full px-3 py-2 rounded-lg text-xs font-medium transition-colors"
+            style={{ background: "var(--accent-light)", color: "var(--accent)", border: "1px solid var(--border)" }}
+          >
+            📦 导出所有数据
+          </button>
+          {exportStatus && (
+            <p className="text-[10px] text-center" style={{ color: exportStatus.includes("失败") ? "var(--red)" : "var(--green)" }}>{exportStatus}</p>
+          )}
+          <button
+            onClick={handleImport}
+            className="w-full px-3 py-2 rounded-lg text-xs font-medium transition-colors"
+            style={{ background: "var(--bg-secondary)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
+          >
+            📥 导入数据
+          </button>
+          {importStatus && (
+            <p className="text-[10px] text-center" style={{ color: importStatus.includes("失败") ? "var(--red)" : "var(--green)" }}>{importStatus}</p>
+          )}
+          <p className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>
+            导出格式: JSON，包含所有按键统计和设置
+          </p>
+        </div>
+      </section>
+
       {saving && <div className="text-center"><span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>保存中...</span></div>}
     </div>
   );
