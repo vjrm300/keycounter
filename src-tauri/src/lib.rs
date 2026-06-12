@@ -99,6 +99,18 @@ fn get_monthly_stats() -> DailyStats {
     storage::aggregate_stats(&daily_stats, &start, &end)
 }
 
+/// 导出所有数据为 JSON 文件
+#[tauri::command]
+fn export_data() -> Result<String, String> {
+    storage::export_all()
+}
+
+/// 从 JSON 字符串导入数据
+#[tauri::command]
+fn import_data(json: String) -> Result<usize, String> {
+    storage::import_from_json(&json)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -159,6 +171,8 @@ pub fn run() {
             get_key_count,
             create_floating_ball,
             close_floating_ball,
+            export_data,
+            import_data,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
